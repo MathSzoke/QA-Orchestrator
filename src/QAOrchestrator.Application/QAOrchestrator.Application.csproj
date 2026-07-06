@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\QAOrchestrator.Domain\QAOrchestrator.Domain.csproj" />
+    <ProjectReference Include="..\QAOrchestrator.DotNet\QAOrchestrator.DotNet.csproj" />
+    <ProjectReference Include="..\QAOrchestrator.Reporting\QAOrchestrator.Reporting.csproj" />
+    <ProjectReference Include="..\QAOrchestrator.Infrastructure\QAOrchestrator.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
