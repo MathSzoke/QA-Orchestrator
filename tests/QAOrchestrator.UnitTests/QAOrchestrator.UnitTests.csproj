@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\QAOrchestrator.Domain\QAOrchestrator.Domain.csproj" />
     <ProjectReference Include="..\..\src\QAOrchestrator.DotNet\QAOrchestrator.DotNet.csproj" />
     <ProjectReference Include="..\..\src\QAOrchestrator.Reporting\QAOrchestrator.Reporting.csproj" />
+    <ProjectReference Include="..\..\src\QAOrchestrator.Cli\QAOrchestrator.Cli.csproj" />
   </ItemGroup>
 
 </Project>

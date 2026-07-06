@@ -1,19 +1,66 @@
 using FluentAssertions;
+using QAOrchestrator.Cli;
+using System.CommandLine;
 
 namespace QAOrchestrator.UnitTests;
 
 public sealed class CliRegistrationTests
 {
     [Fact]
-    public void Program_RegistersBoostVersionAndDoctorCommands()
+    public void RootCommand_RegistersExpectedSubcommands()
     {
-        var program = File.ReadAllText(Path.Combine(GetRepositoryRoot(), "src", "QAOrchestrator.Cli", "Program.cs"));
+        var command = CommandRegistration.CreateRootCommand();
 
-        program.Should().Contain("CreateBoostCommand");
-        program.Should().Contain("CreateVersionCommand");
-        program.Should().Contain("CreateDoctorCommand");
-        program.Should().Contain("--max-candidates");
-        program.Should().Contain("--no-validation");
+        command.Subcommands.Select(subcommand => subcommand.Name)
+            .Should()
+            .Contain(["init", "analyze", "clean", "boost", "coverage", "mutation", "report", "doctor", "version"]);
+    }
+
+    [Theory]
+    [InlineData("doctor")]
+    [InlineData("version")]
+    [InlineData("boost")]
+    public void RootCommand_ParsesRegisteredSubcommands(string subcommand)
+    {
+        var result = CommandRegistration.CreateRootCommand().Parse(subcommand);
+
+        result.Errors.Should().BeEmpty();
+        result.CommandResult.Command.Name.Should().Be(subcommand);
+    }
+
+    [Theory]
+    [InlineData("--dry-run")]
+    [InlineData("--include-existing")]
+    [InlineData("--no-validation")]
+    [InlineData("--max-candidates 3")]
+    [InlineData("--solution QAOrchestrator.sln")]
+    [InlineData("--target unit,endpoints")]
+    [InlineData("--safe")]
+    public void BoostCommand_ParsesExpectedOptions(string option)
+    {
+        var result = CommandRegistration.CreateRootCommand().Parse($"boost {option}");
+
+        result.Errors.Should().BeEmpty();
+        result.CommandResult.Command.Name.Should().Be("boost");
+    }
+
+    [Fact]
+    public void BoostHelp_ParsesWithoutErrors()
+    {
+        var result = CommandRegistration.CreateRootCommand().Parse("boost --help");
+
+        result.Errors.Should().BeEmpty();
+        result.CommandResult.Command.Name.Should().Be("boost");
+    }
+
+    [Fact]
+    public void RootHelp_ContainsBoostDoctorAndVersion()
+    {
+        var root = CommandRegistration.CreateRootCommand();
+
+        root.Subcommands.Select(subcommand => subcommand.Name)
+            .Should()
+            .Contain(["boost", "doctor", "version"]);
     }
 
     [Fact]
