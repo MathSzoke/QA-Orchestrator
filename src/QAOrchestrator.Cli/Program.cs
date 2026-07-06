@@ -10,6 +10,7 @@ var root = new RootCommand("QA Orchestrator - conservative coverage booster for 
 
 root.Add(CreateInitCommand(services));
 root.Add(CreateAnalyzeCommand(services));
+root.Add(CreateCleanCommand(services));
 root.Add(CreateCoverageCommand());
 root.Add(CreateBoostCommand());
 root.Add(CreateChangedCommand());
@@ -54,6 +55,67 @@ static Command CreateAnalyzeCommand(CliServices services)
         catch (Exception exception)
         {
             Console.Error.WriteLine($"analyze failed: {exception.Message}");
+            return 1;
+        }
+    });
+
+    return command;
+}
+
+static Command CreateCleanCommand(CliServices services)
+{
+    var dryRunOption = new Option<bool>("--dry-run")
+    {
+        Description = "Show QA Orchestrator artifacts that would be removed without deleting them."
+    };
+
+    var forceOption = new Option<bool>("--force")
+    {
+        Description = "Remove artifacts without asking for confirmation."
+    };
+
+    var command = new Command("clean", "Remove QA Orchestrator artifacts from the current target repository.");
+    command.Add(dryRunOption);
+    command.Add(forceOption);
+    command.SetAction(parseResult =>
+    {
+        try
+        {
+            var dryRun = parseResult.GetValue(dryRunOption);
+            var force = parseResult.GetValue(forceOption);
+            var plan = services.CleanArtifacts.BuildPlan(Environment.CurrentDirectory);
+
+            if (!plan.HasTargets)
+            {
+                Console.WriteLine("No QA Orchestrator artifacts were found in the current directory.");
+                return 0;
+            }
+
+            WriteCleanPlan(plan, dryRun);
+
+            if (dryRun)
+            {
+                Console.WriteLine();
+                Console.WriteLine("No files were deleted.");
+                return 0;
+            }
+
+            if (!force && !ConfirmClean())
+            {
+                Console.WriteLine("Clean cancelled. No files were deleted.");
+                return 1;
+            }
+
+            var result = services.CleanArtifacts.Execute(plan, dryRun: false);
+            Console.WriteLine();
+            Console.WriteLine(result.Deleted
+                ? $"Removed {result.RemovedPaths.Count} QA Orchestrator artifact(s)."
+                : "No QA Orchestrator artifacts were removed.");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"clean failed: {exception.Message}");
             return 1;
         }
     });
@@ -142,6 +204,32 @@ static int WriteExecutionResult(ExecutionResult result)
     return result.Success ? 0 : 1;
 }
 
+static void WriteCleanPlan(CleanPlan plan, bool dryRun)
+{
+    Console.WriteLine(dryRun ? "QA Orchestrator clean dry-run:" : "QA Orchestrator clean plan:");
+    Console.WriteLine();
+    Console.WriteLine(dryRun ? "Would remove:" : "Will remove:");
+    foreach (var target in plan.Targets)
+    {
+        Console.WriteLine($"- {target.RelativePath}");
+    }
+
+    if (!dryRun)
+    {
+        Console.WriteLine();
+        Console.WriteLine("Use --dry-run to preview without deleting.");
+        Console.WriteLine("Use --force to skip confirmation.");
+    }
+}
+
+static bool ConfirmClean()
+{
+    Console.WriteLine();
+    Console.Write("Remove these QA Orchestrator artifacts? Type 'yes' to continue: ");
+    var answer = Console.ReadLine();
+    return string.Equals(answer, "yes", StringComparison.OrdinalIgnoreCase);
+}
+
 internal sealed class CliServices
 {
     private readonly ConfigurationStore _configurationStore = new();
@@ -152,6 +240,8 @@ internal sealed class CliServices
 
     public GenerateReportUseCase GenerateReport { get; }
 
+    public CleanQaOrchestratorArtifactsUseCase CleanArtifacts { get; }
+
     public CliServices()
     {
         InitializeConfiguration = new InitializeConfigurationUseCase(_configurationStore);
@@ -160,5 +250,6 @@ internal sealed class CliServices
             new DotNetSolutionReader(),
             new AnalysisReportWriter());
         GenerateReport = new GenerateReportUseCase(_configurationStore);
+        CleanArtifacts = new CleanQaOrchestratorArtifactsUseCase(new CleanArtifactService());
     }
 }

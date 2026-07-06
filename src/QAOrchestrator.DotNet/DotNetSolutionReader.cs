@@ -6,9 +6,23 @@ namespace QAOrchestrator.DotNet;
 
 public sealed class DotNetSolutionReader
 {
+    private readonly TestPackageClassifier _packageClassifier;
+    private readonly TestPatternReader _testPatternReader;
+
     private static readonly Regex SolutionProjectRegex = new(
         "^Project\\(\"(?<typeGuid>[^\"]+)\"\\) = \"(?<name>[^\"]+)\", \"(?<path>[^\"]+)\", \"(?<guid>[^\"]+)\"",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    public DotNetSolutionReader()
+        : this(new TestPackageClassifier(), new TestPatternReader())
+    {
+    }
+
+    public DotNetSolutionReader(TestPackageClassifier packageClassifier, TestPatternReader testPatternReader)
+    {
+        _packageClassifier = packageClassifier;
+        _testPatternReader = testPatternReader;
+    }
 
     public TargetSolution Read(string solutionPath)
     {
@@ -78,14 +92,15 @@ public sealed class DotNetSolutionReader
             .ToArray();
 
         var projectName = Path.GetFileNameWithoutExtension(fullProjectPath);
-        var testFramework = DetectTestFramework(packageReferences);
-        var mockFramework = DetectMockFramework(packageReferences);
-        var assertionFramework = DetectAssertionFramework(packageReferences);
+        var packageClassifications = _packageClassifier.Classify(packageReferences);
+        var testFramework = _packageClassifier.DetectTestFramework(packageClassifications);
+        var mockFramework = _packageClassifier.DetectMockFramework(packageClassifications);
+        var assertionFramework = _packageClassifier.DetectAssertionFramework(packageClassifications);
         var kind = IsTestProject(projectName, root, packageReferences, testFramework)
             ? ProjectKind.Test
             : ProjectKind.Source;
 
-        return new TargetProject(
+        var project = new TargetProject(
             projectName,
             fullProjectPath,
             Path.GetDirectoryName(fullProjectPath)!,
@@ -95,7 +110,13 @@ public sealed class DotNetSolutionReader
             projectReferences,
             testFramework,
             mockFramework,
-            assertionFramework);
+            assertionFramework,
+            packageClassifications,
+            null);
+
+        return project.IsTestProject
+            ? project with { TestPattern = _testPatternReader.Read(project) }
+            : project;
     }
 
     private static PackageReferenceInfo ReadPackageReference(XElement element)
@@ -151,61 +172,6 @@ public sealed class DotNetSolutionReader
         }
 
         return HasPackage(packageReferences, "Microsoft.NET.Test.Sdk");
-    }
-
-    private static TestFramework DetectTestFramework(IReadOnlyCollection<PackageReferenceInfo> packages)
-    {
-        if (HasPackage(packages, "xunit") || HasPackage(packages, "xunit.v3"))
-        {
-            return TestFramework.XUnit;
-        }
-
-        if (HasPackage(packages, "NUnit"))
-        {
-            return TestFramework.NUnit;
-        }
-
-        if (HasPackage(packages, "MSTest.TestFramework"))
-        {
-            return TestFramework.MSTest;
-        }
-
-        return TestFramework.Unknown;
-    }
-
-    private static MockFramework DetectMockFramework(IReadOnlyCollection<PackageReferenceInfo> packages)
-    {
-        if (HasPackage(packages, "Moq"))
-        {
-            return MockFramework.Moq;
-        }
-
-        if (HasPackage(packages, "NSubstitute"))
-        {
-            return MockFramework.NSubstitute;
-        }
-
-        if (HasPackage(packages, "FakeItEasy"))
-        {
-            return MockFramework.FakeItEasy;
-        }
-
-        return MockFramework.Unknown;
-    }
-
-    private static AssertionFramework DetectAssertionFramework(IReadOnlyCollection<PackageReferenceInfo> packages)
-    {
-        if (HasPackage(packages, "FluentAssertions"))
-        {
-            return AssertionFramework.FluentAssertions;
-        }
-
-        if (HasPackage(packages, "Shouldly"))
-        {
-            return AssertionFramework.Shouldly;
-        }
-
-        return AssertionFramework.Unknown;
     }
 
     private static bool HasPackage(IEnumerable<PackageReferenceInfo> packages, string packageName)

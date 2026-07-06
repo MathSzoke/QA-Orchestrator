@@ -25,8 +25,24 @@ public enum MockFramework
 public enum AssertionFramework
 {
     Unknown,
+    AwesomeAssertions,
     FluentAssertions,
     Shouldly
+}
+
+public enum TestPackageCategory
+{
+    TestFramework,
+    AssertionFramework,
+    MockFramework,
+    CoverageTool,
+    MutationTool,
+    HttpClientTool,
+    IntegrationTestTool,
+    FunctionalTestTool,
+    ContainerTool,
+    DataGenerationTool,
+    UnknownTestRelatedPackage
 }
 
 public enum ArchitectureStyle
@@ -56,7 +72,9 @@ public sealed record TargetProject(
     IReadOnlyList<ProjectReferenceInfo> ProjectReferences,
     TestFramework TestFramework,
     MockFramework MockFramework,
-    AssertionFramework AssertionFramework)
+    AssertionFramework AssertionFramework,
+    IReadOnlyList<TestPackageClassification> TestPackageClassifications,
+    TestProjectPattern? TestPattern)
 {
     public bool IsTestProject => Kind == ProjectKind.Test;
 }
@@ -66,6 +84,12 @@ public sealed record SourceProject(TargetProject Project);
 public sealed record TestProject(TargetProject Project);
 
 public sealed record PackageReferenceInfo(string Name, string Version);
+
+public sealed record TestPackageClassification(
+    string PackageName,
+    string Version,
+    TestPackageCategory Category,
+    string ToolName);
 
 public sealed record ProjectReferenceInfo(string Include, string? ProjectName);
 
@@ -91,6 +115,51 @@ public sealed record TestPattern(
     AssertionFramework AssertionFramework,
     IReadOnlyList<string> NamingConventions,
     IReadOnlyList<string> FixtureTypes);
+
+public sealed record TestProjectPattern(
+    string ProjectName,
+    int TestClassCount,
+    IReadOnlyList<TestClassPattern> Classes,
+    IReadOnlyList<TestMethodPattern> Methods,
+    IReadOnlyList<TestAttributeUsage> AttributeUsages,
+    IReadOnlyList<DetectedUsing> CommonUsings,
+    IReadOnlyList<TestNamingConvention> NamingConventions,
+    TestCodePattern CodePattern,
+    IReadOnlyList<TestDependencyUsage> DependencyUsages);
+
+public sealed record TestCodePattern(
+    bool UsesArrangeActAssert,
+    bool UsesMoqMock,
+    bool UsesMoqSetup,
+    bool UsesMoqVerify,
+    bool UsesFixture,
+    bool UsesWebApplicationFactory,
+    bool UsesHttpClient,
+    bool UsesShouldAssertions,
+    bool UsesAwesomeAssertions,
+    bool UsesRefitClients,
+    bool UsesXUnitCollectionFixtures);
+
+public sealed record DetectedUsing(string Namespace, int Count);
+
+public sealed record TestClassPattern(string Name, string? Suffix, string FilePath);
+
+public sealed record TestMethodPattern(string Name, string? NamingConvention, string FilePath);
+
+public sealed record TestAttributeUsage(string Name, int Count);
+
+public sealed record TestNamingConvention(string Name, int Count);
+
+public sealed record TestDependencyUsage(string Name, int Count);
+
+public sealed record CleanPlan(string RootDirectory, IReadOnlyList<CleanTarget> Targets)
+{
+    public bool HasTargets => Targets.Count > 0;
+}
+
+public sealed record CleanTarget(string Path, string RelativePath, bool IsDirectory);
+
+public sealed record CleanResult(CleanPlan Plan, bool DryRun, bool Deleted, IReadOnlyList<string> RemovedPaths);
 
 public sealed record CoverageReport(decimal LineCoverage, decimal BranchCoverage, IReadOnlyList<CoverageGap> Gaps);
 

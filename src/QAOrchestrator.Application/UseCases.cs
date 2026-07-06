@@ -79,6 +79,22 @@ public sealed class AnalyzeSolutionUseCase
 
 public sealed record AnalyzeSolutionResult(TargetSolution Solution, string ReportPath, string ConsoleSummary);
 
+public sealed class CleanQaOrchestratorArtifactsUseCase
+{
+    private readonly CleanArtifactService _cleanArtifactService;
+
+    public CleanQaOrchestratorArtifactsUseCase(CleanArtifactService cleanArtifactService)
+    {
+        _cleanArtifactService = cleanArtifactService;
+    }
+
+    public CleanPlan BuildPlan(string workingDirectory)
+        => _cleanArtifactService.BuildPlan(Path.GetFullPath(workingDirectory));
+
+    public CleanResult Execute(CleanPlan plan, bool dryRun)
+        => _cleanArtifactService.Execute(plan, dryRun);
+}
+
 public sealed class BoostCoverageUseCase
 {
     public ExecutionResult Execute()

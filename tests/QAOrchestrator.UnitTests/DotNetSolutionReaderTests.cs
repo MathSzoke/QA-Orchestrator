@@ -26,11 +26,44 @@ public sealed class DotNetSolutionReaderTests
               <ItemGroup>
                 <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
                 <PackageReference Include="xunit" Version="2.9.3" />
-                <PackageReference Include="NSubstitute" Version="5.3.0" />
-                <PackageReference Include="FluentAssertions" Version="8.10.0" />
+                <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+                <PackageReference Include="Moq" Version="4.20.72" />
+                <PackageReference Include="AwesomeAssertions" Version="9.0.0" />
+                <PackageReference Include="Refit.HttpClientFactory" Version="8.0.0" />
+                <PackageReference Include="coverlet.collector" Version="6.0.4" />
+                <PackageReference Include="coverlet.msbuild" Version="6.0.4" />
                 <ProjectReference Include="..\..\src\App\App.csproj" />
               </ItemGroup>
             </Project>
+            """);
+        Directory.CreateDirectory(Path.GetDirectoryName(testProject)!);
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(testProject)!, "UserHandlerTests.cs"), """
+            using AwesomeAssertions;
+            using Moq;
+            using Refit;
+            using Xunit;
+
+            public sealed class UserHandlerTests : IClassFixture<ApiFixture>
+            {
+                [Fact]
+                [Trait("Category", "Unit")]
+                public void Should_ReturnUser_When_UserExists()
+                {
+                    // Arrange
+                    var repository = new Mock<IUserRepository>();
+                    repository.Setup(x => x.Get()).Returns("user");
+
+                    // Act
+                    var result = repository.Object.Get();
+
+                    // Assert
+                    result.Should().Be("user");
+                    repository.Verify(x => x.Get(), Times.Once);
+                }
+            }
+
+            public sealed class ApiFixture;
+            public interface IUserRepository { string Get(); }
             """);
 
         var solutionPath = Path.Combine(temp.Path, "Sample.sln");
@@ -52,9 +85,19 @@ public sealed class DotNetSolutionReaderTests
         var detectedTestProject = solution.Projects.Single(project => project.Name == "App.Tests");
         detectedTestProject.Kind.Should().Be(ProjectKind.Test);
         detectedTestProject.TestFramework.Should().Be(TestFramework.XUnit);
-        detectedTestProject.MockFramework.Should().Be(MockFramework.NSubstitute);
-        detectedTestProject.AssertionFramework.Should().Be(AssertionFramework.FluentAssertions);
+        detectedTestProject.MockFramework.Should().Be(MockFramework.Moq);
+        detectedTestProject.AssertionFramework.Should().Be(AssertionFramework.AwesomeAssertions);
         detectedTestProject.ProjectReferences.Should().Contain(reference => reference.ProjectName == "App");
+        detectedTestProject.TestPackageClassifications.Should().Contain(classification => classification.Category == TestPackageCategory.CoverageTool && classification.ToolName == "coverlet.collector");
+        detectedTestProject.TestPackageClassifications.Should().Contain(classification => classification.Category == TestPackageCategory.HttpClientTool && classification.ToolName == "Refit.HttpClientFactory");
+        detectedTestProject.TestPattern.Should().NotBeNull();
+        detectedTestProject.TestPattern!.TestClassCount.Should().BeGreaterThan(0);
+        detectedTestProject.TestPattern.CodePattern.UsesMoqMock.Should().BeTrue();
+        detectedTestProject.TestPattern.CodePattern.UsesMoqSetup.Should().BeTrue();
+        detectedTestProject.TestPattern.CodePattern.UsesMoqVerify.Should().BeTrue();
+        detectedTestProject.TestPattern.CodePattern.UsesShouldAssertions.Should().BeTrue();
+        detectedTestProject.TestPattern.CodePattern.UsesAwesomeAssertions.Should().BeTrue();
+        detectedTestProject.TestPattern.CodePattern.UsesXUnitCollectionFixtures.Should().BeTrue();
     }
 
     [Fact]
