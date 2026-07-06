@@ -1,5 +1,6 @@
 using QAOrchestrator.Domain;
 using QAOrchestrator.DotNet;
+using QAOrchestrator.Generation;
 using QAOrchestrator.Infrastructure;
 using QAOrchestrator.Reporting;
 
@@ -97,8 +98,125 @@ public sealed class CleanQaOrchestratorArtifactsUseCase
 
 public sealed class BoostCoverageUseCase
 {
-    public ExecutionResult Execute()
-        => ExecutionResult.Fail("boost is planned for the next implementation phase. The current foundation supports init and analyze.");
+    private readonly ConfigurationStore _configurationStore;
+    private readonly DotNetSolutionReader _solutionReader;
+    private readonly TestGenerationPlanner _planner;
+    private readonly TestCandidateWriter _candidateWriter;
+    private readonly BoostReportWriter _reportWriter;
+    private readonly ProcessExecutor _processExecutor;
+
+    public BoostCoverageUseCase(
+        ConfigurationStore configurationStore,
+        DotNetSolutionReader solutionReader,
+        TestGenerationPlanner planner,
+        TestCandidateWriter candidateWriter,
+        BoostReportWriter reportWriter,
+        ProcessExecutor processExecutor)
+    {
+        _configurationStore = configurationStore;
+        _solutionReader = solutionReader;
+        _planner = planner;
+        _candidateWriter = candidateWriter;
+        _reportWriter = reportWriter;
+        _processExecutor = processExecutor;
+    }
+
+    public async Task<BoostReport> ExecuteAsync(BoostOptions options, CancellationToken cancellationToken = default)
+    {
+        var rootDirectory = Path.GetFullPath(options.WorkingDirectory);
+        var config = _configurationStore.LoadOrDefault(rootDirectory);
+        _configurationStore.EnsureWorkingFolders(rootDirectory, config);
+
+        var solutionPath = ResolveSolutionPath(rootDirectory, options.Solution ?? config.Solution);
+        var solution = _solutionReader.Read(solutionPath);
+        var effectiveOptions = options.Targets.Count == 0
+            ? options with { Targets = ParseTargets(config.Targets) }
+            : options;
+
+        var plan = _planner.CreateBoostPlan(solution, config, effectiveOptions);
+        var generated = new List<BoostCandidate>();
+        var accepted = new List<BoostCandidate>();
+        var failed = new List<BoostCandidate>();
+
+        if (!effectiveOptions.DryRun)
+        {
+            foreach (var candidate in plan.Candidates)
+            {
+                var written = _candidateWriter.Write(solution, candidate);
+                generated.Add(written);
+
+                if (effectiveOptions.NoValidation)
+                {
+                    continue;
+                }
+
+                var validation = await _processExecutor.ExecuteAsync("dotnet", $"test \"{solution.SolutionPath}\"", solution.RootDirectory, cancellationToken);
+                if (validation.Success)
+                {
+                    accepted.Add(_candidateWriter.MoveToStatus(written, CandidateStatus.Accepted));
+                }
+                else
+                {
+                    var failure = string.IsNullOrWhiteSpace(validation.StandardError)
+                        ? validation.StandardOutput
+                        : validation.StandardError;
+                    failed.Add(_candidateWriter.MoveToStatus(written, CandidateStatus.Failed, TrimFailure(failure)));
+                }
+            }
+        }
+
+        var reportDirectory = _configurationStore.ResolveConfiguredPath(rootDirectory, config.Generation.ReportFolder);
+        var provisionalReport = new BoostReport(plan, generated, accepted, failed, string.Empty, string.Empty, string.Empty);
+        var paths = _reportWriter.Write(provisionalReport, reportDirectory);
+        var finalReport = provisionalReport with
+        {
+            MarkdownReportPath = paths.MarkdownPath,
+            JsonReportPath = paths.JsonPath
+        };
+
+        return finalReport with { ConsoleSummary = _reportWriter.BuildConsoleSummary(finalReport) };
+    }
+
+    private static IReadOnlyList<BoostTarget> ParseTargets(IEnumerable<string> values)
+        => values
+            .SelectMany(value => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(ParseTarget)
+            .Where(target => target is not null)
+            .Select(target => target!.Value)
+            .Distinct()
+            .ToArray();
+
+    private static BoostTarget? ParseTarget(string value)
+        => value.ToLowerInvariant() switch
+        {
+            "unit" => BoostTarget.Unit,
+            "endpoint" or "endpoints" => BoostTarget.Endpoints,
+            "integration" => BoostTarget.Integration,
+            "functional" => BoostTarget.Functional,
+            "mutation" => BoostTarget.Mutation,
+            _ => null
+        };
+
+    private static string ResolveSolutionPath(string rootDirectory, string? solution)
+    {
+        if (!string.IsNullOrWhiteSpace(solution))
+        {
+            return Path.IsPathRooted(solution)
+                ? solution
+                : Path.Combine(rootDirectory, solution);
+        }
+
+        var solutions = Directory.EnumerateFiles(rootDirectory, "*.sln", SearchOption.TopDirectoryOnly).ToArray();
+        return solutions.Length switch
+        {
+            1 => solutions[0],
+            0 => throw new FileNotFoundException("No .sln file was found. Pass --solution <file.sln>."),
+            _ => throw new InvalidOperationException("More than one .sln file was found. Pass --solution <file.sln>.")
+        };
+    }
+
+    private static string TrimFailure(string value)
+        => value.Length <= 4000 ? value : value[..4000];
 }
 
 public sealed class AnalyzeChangedFilesUseCase

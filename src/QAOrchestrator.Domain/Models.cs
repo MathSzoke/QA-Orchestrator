@@ -55,6 +55,54 @@ public enum ArchitectureStyle
     SimpleServiceLayer
 }
 
+public enum BoostTarget
+{
+    Unit,
+    Endpoints,
+    Integration,
+    Functional,
+    Mutation
+}
+
+public enum TestType
+{
+    Unit,
+    Integration,
+    Functional,
+    Endpoint
+}
+
+public enum CandidateStatus
+{
+    Planned,
+    Generated,
+    Accepted,
+    Failed,
+    Skipped
+}
+
+public enum ExistingTestMatchKind
+{
+    Exact,
+    Strong,
+    Weak,
+    None
+}
+
+public enum TestableSourceKind
+{
+    Handler,
+    Validator,
+    Service,
+    Rule,
+    Policy,
+    Mapper,
+    Factory,
+    Guard,
+    Endpoint,
+    GeneralClass
+}
+
 public sealed record TargetSolution(
     string Name,
     string SolutionPath,
@@ -160,6 +208,83 @@ public sealed record CleanPlan(string RootDirectory, IReadOnlyList<CleanTarget> 
 public sealed record CleanTarget(string Path, string RelativePath, bool IsDirectory);
 
 public sealed record CleanResult(CleanPlan Plan, bool DryRun, bool Deleted, IReadOnlyList<string> RemovedPaths);
+
+public sealed record BoostOptions(
+    string WorkingDirectory,
+    string? Solution,
+    IReadOnlyList<BoostTarget> Targets,
+    bool SafeMode,
+    bool DryRun,
+    int MaxCandidates,
+    bool IncludeExisting,
+    bool NoValidation);
+
+public sealed record TestableSourceClass(
+    string ProjectName,
+    string FilePath,
+    string RelativePath,
+    string Namespace,
+    string ClassName,
+    TestableSourceKind Kind,
+    IReadOnlyList<string> PublicMethods,
+    IReadOnlyList<string> ConstructorDependencies,
+    bool IsUnitTestable,
+    string Reason);
+
+public sealed record ExistingTestMatch(
+    ExistingTestMatchKind Kind,
+    string TestFilePath,
+    string RelativePath,
+    int Confidence,
+    string Reason);
+
+public sealed record ExistingTestMatchResult(
+    TestableSourceClass SourceClass,
+    IReadOnlyList<ExistingTestMatch> ExactMatches,
+    IReadOnlyList<ExistingTestMatch> StrongMatches,
+    IReadOnlyList<ExistingTestMatch> WeakMatches,
+    int Confidence,
+    string Reason)
+{
+    public bool HasExactOrStrongMatch => ExactMatches.Count > 0 || StrongMatches.Count > 0;
+}
+
+public sealed record TestLocationResolution(
+    TestType TestType,
+    string? MatchingTestProject,
+    IReadOnlyList<string> ExistingExactTestFiles,
+    IReadOnlyList<string> ExistingSimilarTestFiles,
+    string SuggestedFinalPath,
+    string CandidatePath,
+    int Confidence,
+    string Reason,
+    bool IsComplementary,
+    bool NeedsManualReview);
+
+public sealed record BoostCandidate(
+    TestableSourceClass SourceClass,
+    ExistingTestMatchResult ExistingTestMatch,
+    TestLocationResolution Location,
+    CandidateStatus Status,
+    string CandidateName,
+    string Reason,
+    string? FailureReason);
+
+public sealed record BoostPlan(
+    TargetSolution Solution,
+    IReadOnlyList<BoostTarget> Targets,
+    IReadOnlyList<TestableSourceClass> SourceClasses,
+    IReadOnlyList<BoostCandidate> Candidates,
+    IReadOnlyList<BoostCandidate> SkippedCandidates);
+
+public sealed record BoostReport(
+    BoostPlan Plan,
+    IReadOnlyList<BoostCandidate> GeneratedCandidates,
+    IReadOnlyList<BoostCandidate> AcceptedCandidates,
+    IReadOnlyList<BoostCandidate> FailedCandidates,
+    string MarkdownReportPath,
+    string JsonReportPath,
+    string ConsoleSummary);
 
 public sealed record CoverageReport(decimal LineCoverage, decimal BranchCoverage, IReadOnlyList<CoverageGap> Gaps);
 

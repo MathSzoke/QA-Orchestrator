@@ -1,9 +1,11 @@
 using QAOrchestrator.Application;
 using QAOrchestrator.DotNet;
 using QAOrchestrator.Domain;
+using QAOrchestrator.Generation;
 using QAOrchestrator.Infrastructure;
 using QAOrchestrator.Reporting;
 using System.CommandLine;
+using System.Reflection;
 
 var services = new CliServices();
 var root = new RootCommand("QA Orchestrator - conservative coverage booster for .NET solutions.");
@@ -12,10 +14,12 @@ root.Add(CreateInitCommand(services));
 root.Add(CreateAnalyzeCommand(services));
 root.Add(CreateCleanCommand(services));
 root.Add(CreateCoverageCommand());
-root.Add(CreateBoostCommand());
+root.Add(CreateBoostCommand(services));
 root.Add(CreateChangedCommand());
 root.Add(CreateMutationCommand());
 root.Add(CreateReportCommand(services));
+root.Add(CreateVersionCommand());
+root.Add(CreateDoctorCommand());
 
 return await root.Parse(args).InvokeAsync();
 
@@ -131,13 +135,70 @@ static Command CreateCoverageCommand()
     return command;
 }
 
-static Command CreateBoostCommand()
+static Command CreateBoostCommand(CliServices services)
 {
+    var solutionOption = new Option<string?>("--solution", "-s")
+    {
+        Description = "Path to the target .sln file."
+    };
+
+    var targetOption = new Option<string?>("--target", "-t")
+    {
+        Description = "Comma-separated target list. Initially supported: unit,endpoints."
+    };
+
+    var dryRunOption = new Option<bool>("--dry-run")
+    {
+        Description = "Build and report the boost plan without generating candidate files."
+    };
+
+    var maxCandidatesOption = new Option<int>("--max-candidates")
+    {
+        Description = "Maximum number of candidates generated in this run. Defaults to 10."
+    };
+
+    var includeExistingOption = new Option<bool>("--include-existing")
+    {
+        Description = "Include classes with existing tests in the report and complementary planning."
+    };
+
+    var noValidationOption = new Option<bool>("--no-validation")
+    {
+        Description = "Generate candidates without running dotnet test."
+    };
+
     var command = new Command("boost", "Generate and validate conservative coverage-boosting test candidates.");
-    AddCommonSolutionOption(command);
-    AddTargetOption(command);
+    command.Add(solutionOption);
+    command.Add(targetOption);
     AddSafeOption(command);
-    command.SetAction(_ => WriteExecutionResult(new BoostCoverageUseCase().Execute()));
+    command.Add(dryRunOption);
+    command.Add(maxCandidatesOption);
+    command.Add(includeExistingOption);
+    command.Add(noValidationOption);
+    command.SetAction(async parseResult =>
+    {
+        try
+        {
+            var options = new BoostOptions(
+                Environment.CurrentDirectory,
+                parseResult.GetValue(solutionOption),
+                ParseBoostTargets(parseResult.GetValue(targetOption)),
+                SafeMode: true,
+                DryRun: parseResult.GetValue(dryRunOption),
+                MaxCandidates: parseResult.GetValue(maxCandidatesOption) <= 0 ? 10 : parseResult.GetValue(maxCandidatesOption),
+                IncludeExisting: parseResult.GetValue(includeExistingOption),
+                NoValidation: parseResult.GetValue(noValidationOption));
+
+            var report = await services.BoostCoverage.ExecuteAsync(options);
+            Console.WriteLine(report.ConsoleSummary);
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"boost failed: {exception.Message}");
+            return 1;
+        }
+    });
     return command;
 }
 
@@ -173,6 +234,63 @@ static Command CreateReportCommand(CliServices services)
     return command;
 }
 
+static Command CreateVersionCommand()
+{
+    var command = new Command("version", "Show QA Orchestrator version and runtime location.");
+    command.SetAction(_ =>
+    {
+        var assembly = typeof(CliServices).Assembly;
+        var info = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? assembly.GetName().Version?.ToString()
+            ?? "unknown";
+        Console.WriteLine("Tool name: qa-orchestrator");
+        Console.WriteLine($"Version: {assembly.GetName().Version}");
+        Console.WriteLine($"Informational version: {info}");
+        Console.WriteLine($"Assembly location: {assembly.Location}");
+        Console.WriteLine($"Current directory: {Environment.CurrentDirectory}");
+        return 0;
+    });
+    return command;
+}
+
+static Command CreateDoctorCommand()
+{
+    var command = new Command("doctor", "Show environment diagnostics and global tool update guidance.");
+    command.SetAction(_ =>
+    {
+        var assembly = typeof(CliServices).Assembly;
+        var assemblyLocation = assembly.Location;
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var dotnetTools = Path.Combine(userProfile, ".dotnet", "tools");
+        var pathEntries = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var globalToolsInPath = pathEntries.Any(entry => string.Equals(Path.GetFullPath(entry), Path.GetFullPath(dotnetTools), StringComparison.OrdinalIgnoreCase));
+        var looksGlobalTool = assemblyLocation.Contains($"{Path.DirectorySeparatorChar}.dotnet{Path.DirectorySeparatorChar}tools", StringComparison.OrdinalIgnoreCase)
+            || assemblyLocation.Contains($"{Path.DirectorySeparatorChar}.store{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
+
+        Console.WriteLine("QA Orchestrator doctor");
+        Console.WriteLine($"Configuration in current directory: {(File.Exists(Path.Combine(Environment.CurrentDirectory, ConfigurationStore.FileName)) ? "found" : "not found")}");
+        Console.WriteLine($"Execution mode: {(looksGlobalTool ? "global tool" : "dotnet run/local assembly")}");
+        Console.WriteLine($"Assembly location: {assemblyLocation}");
+        Console.WriteLine($"Version: {assembly.GetName().Version}");
+        Console.WriteLine($".NET global tools path: {dotnetTools}");
+        Console.WriteLine($"Global tools path in PATH: {(globalToolsInPath ? "yes" : "no")}");
+        Console.WriteLine();
+        Console.WriteLine("Update after git pull:");
+        Console.WriteLine(@".\scripts\update-global-tool.ps1");
+        Console.WriteLine();
+        Console.WriteLine("Manual update:");
+        Console.WriteLine(@"dotnet pack .\src\QAOrchestrator.Cli\QAOrchestrator.Cli.csproj -c Release");
+        Console.WriteLine(@"dotnet tool update --global --add-source .\src\QAOrchestrator.Cli\nupkg QAOrchestrator.Cli");
+        Console.WriteLine();
+        Console.WriteLine("Manual reinstall fallback:");
+        Console.WriteLine(@"dotnet tool uninstall --global QAOrchestrator.Cli");
+        Console.WriteLine(@"dotnet tool install --global --add-source .\src\QAOrchestrator.Cli\nupkg QAOrchestrator.Cli");
+        return 0;
+    });
+    return command;
+}
+
 static void AddCommonSolutionOption(Command command)
 {
     command.Add(new Option<string?>("--solution", "-s")
@@ -187,6 +305,29 @@ static void AddTargetOption(Command command)
     {
         Description = "Comma-separated target list: unit,integration,functional,mutation."
     });
+}
+
+static IReadOnlyList<BoostTarget> ParseBoostTargets(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return [];
+    }
+
+    return value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(target => target.ToLowerInvariant() switch
+        {
+            "unit" => (BoostTarget?)BoostTarget.Unit,
+            "endpoint" or "endpoints" => BoostTarget.Endpoints,
+            "integration" => BoostTarget.Integration,
+            "functional" => BoostTarget.Functional,
+            "mutation" => BoostTarget.Mutation,
+            _ => null
+        })
+        .Where(target => target is not null)
+        .Select(target => target!.Value)
+        .Distinct()
+        .ToArray();
 }
 
 static void AddSafeOption(Command command)
@@ -242,6 +383,8 @@ internal sealed class CliServices
 
     public CleanQaOrchestratorArtifactsUseCase CleanArtifacts { get; }
 
+    public BoostCoverageUseCase BoostCoverage { get; }
+
     public CliServices()
     {
         InitializeConfiguration = new InitializeConfigurationUseCase(_configurationStore);
@@ -251,5 +394,12 @@ internal sealed class CliServices
             new AnalysisReportWriter());
         GenerateReport = new GenerateReportUseCase(_configurationStore);
         CleanArtifacts = new CleanQaOrchestratorArtifactsUseCase(new CleanArtifactService());
+        BoostCoverage = new BoostCoverageUseCase(
+            _configurationStore,
+            new DotNetSolutionReader(),
+            new TestGenerationPlanner(),
+            new TestCandidateWriter(),
+            new BoostReportWriter(),
+            new ProcessExecutor());
     }
 }
